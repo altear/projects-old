@@ -1,7 +1,7 @@
 # Project Stuff
 ## Python Dependency Management
-[Django - how to write reusable apps](https://docs.djangoproject.com/en/2.0/intro/reusable-apps/)
-[Packaging Python Projects](http://alexanderwaldin.github.io/packaging-python-project.html)
+- [Django - how to write reusable apps](https://docs.djangoproject.com/en/2.0/intro/reusable-apps/)
+- [Packaging Python Projects](http://alexanderwaldin.github.io/packaging-python-project.html)
 
 ### Structure
 One structure:
@@ -48,8 +48,7 @@ Another option is pipreqs, which is better for projects as it can save only the 
 `pipreqs /path/to/project`
 
 ### Pyenv
-This is important and often overlooked, pyenv can help you keep a projects required packages separate from the rest of
-the system.
+This is important and often overlooked, pyenv can help you keep a projects required packages separate from the rest of the system.
 `pip install virtualenv`
 
 # Django Stuff
@@ -63,6 +62,6 @@ cd into the project dir then:
 
 ### To create an app
 First, what is an app? An app is just a component of a project that provides a functionality, perhaps google maps is an
-example. Google has other apps, like gmail, that may be part of the same project/site.
+example. Google has other apps, like gmail, that may be part of the same project/site.     
 `python manage.py startapp customer_rewards`
 
