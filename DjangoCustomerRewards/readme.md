@@ -17,6 +17,7 @@ Project\
 ```
 
 Structure suggested by Django
+```
 Project\
 - Application\
   - setup.py
@@ -26,6 +27,7 @@ Project\
   - license.txt
   - blah.py
 ```
+
 ### Setup.py
 The main way to do dependency management, suggested by django, is to use setup.py
 
