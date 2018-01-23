@@ -16,7 +16,7 @@ The Django creating reusable apps tutorial provides a simple setup.py file
 Setup.py should be managing the installs, but requirements.txt is supposed to complement it and is easier to create.
 
 #### Freeze
-when in the project, you can get a full list of installed packages and their version with    
+when in the project, you can get a full list of installed packages and their version with
 `pip freeze > requirements.txt`
 
 #### Pipreqs
@@ -29,6 +29,25 @@ This is important and often overlooked, pyenv can help you keep a projects requi
 `pip install virtualenv`
 
 # Django Stuff
+
+## Connecting to a UI
+[Combining Django with JS frameworks, how to do it?](https://www.reddit.com/r/django/comments/5dsjbv/combining_django_with_js_frameworks_how_do_you_do/)
+
+### Django-Vue
+Vue is a front end framework that shares similar values to django - you can code it fast.
+
+#### Vue on Django
+- [part I](https://dev.to/rpalo/vue-on-django-part-1)
+- [part II](https://dev.to/rpalo/vue-on-django-part-2)
+- [part III](https://dev.to/rpalo/vue-on-django-part-3)
+- [part IV](https://dev.to/rpalo/vue-on-django-part-4)
+
+#### Django + Webpack + Vue
+- [part I](https://ariera.github.io/2017/09/26/django-webpack-vue-js-setting-up-a-new-project-that-s-easy-to-develop-and-deploy-part-1.html)
+
+#### Build an app with Vue.js and Django
+- [part I](https://scotch.io/bar-talk/build-an-app-with-vuejs-and-django-part-one)
+
 ## Structures
 ### 1.
 ```
@@ -93,31 +112,53 @@ Project\
 
 ## Getting Started
 ### To start a project
-`django-admin startproject mysite`
+```
+django-admin startproject mysite
+```
 
 ### To run the server
 cd into the project dir then:
-`python manage.py runserver`
+```
+python manage.py runserver
+```
 
 ### To create an app
 First, what is an app? An app is just a component of a project that provides a functionality, perhaps google maps is an
 example. Google has other apps, like gmail, that may be part of the same project/site.
-`python manage.py startapp customer_rewards`
+```
+python manage.py startapp customer_rewards
+```
 
-## Connecting to a UI
-[Combining Django with JS frameworks, how to do it?](https://www.reddit.com/r/django/comments/5dsjbv/combining_django_with_js_frameworks_how_do_you_do/)
+### Add a view
+go into the app/view and write
+```
+ from django.http import HttpResponse
 
-### Django-Vue
-Vue is a front end framework that shares similar values to django - you can code it fast.
 
-#### Vue on Django
-[part I](https://dev.to/rpalo/vue-on-django-part-1)
-[part II](https://dev.to/rpalo/vue-on-django-part-2)
-[part III](https://dev.to/rpalo/vue-on-django-part-3)
-[part IV](https://dev.to/rpalo/vue-on-django-part-4)
+def index(request):
+    return HttpResponse("Hello, world. You're at the polls index.")
+ ```
 
-#### Django + Webpack + Vue
-[part I](https://ariera.github.io/2017/09/26/django-webpack-vue-js-setting-up-a-new-project-that-s-easy-to-develop-and-deploy-part-1.html)
+However, to view this we need to tell the app where to put it.
 
-#### Build an app with Vue.js and Django
-[part I](https://scotch.io/bar-talk/build-an-app-with-vuejs-and-django-part-one)
+First do this in the app by creating a `urls.py` file:
+```
+ from django.urls import path
+
+from . import views
+
+urlpatterns = [
+    path('', views.index, name='index'),
+]
+```
+
+Then add this to the main project, by modifying the project's `urls.py` file
+```
+from django.urls import include, path
+from django.contrib import admin
+
+urlpatterns = [
+    path('polls/', include('polls.urls')),
+    path('admin/', admin.site.urls),
+]
+```
