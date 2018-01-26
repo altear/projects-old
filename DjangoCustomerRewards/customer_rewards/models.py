@@ -1,3 +1,5 @@
 from django.db import models
 
-# Create your models here.
+class CustomerReward(models.Model):
+    customer_id = models.UUIDField()
+    rewards_points = models.IntegerField()

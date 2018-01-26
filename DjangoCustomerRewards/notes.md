@@ -198,4 +198,10 @@ are entirely derived from your models file, and are essentially just a
 history that Django can roll through to update your database schema to
 match your current models.
 
-Django can update db schemas to match current model with its migrations funcitonality
+Django can update db schemas to match current model with its migrations functionality
+
+## Server Power Management
+
+Uninterruptible Power Supply
+
+- [alpha](https://www.alpha.ca/) (high end UPS)
