@@ -1,0 +1,5 @@
+[console_scripts]
+ad-test1 = adtk.tests:test1
+ad-test2 = adtk.tests:test2
+gradle_to_maven = adtk.utils:main
+
