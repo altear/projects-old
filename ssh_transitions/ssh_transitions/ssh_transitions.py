@@ -30,13 +30,21 @@ Structure:
                         |
   Success(exit) <-------`
 
+
+~~~~~~~~~~~~~~~~~~~~~~~~~
+Two types of default actions
+- send
+- put
 '''
 
+
 import paramiko
+import socket
 import re
+from functools import partial
 
 class Machine:
-    def __init__(self):
+    def __init__(self, connection_args):
         self.states = []
         self.transitions = []
 
@@ -58,19 +66,37 @@ class Machine:
 
         # input
         self.buffer = b''
+        self.buffer_len = 4096
 
+        # create connections ssh, ssh_channel, and sftp
+        self.conection_args = connection_args
+        self.ssh_client = paramiko.SSHClient()
+        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self.ssh_client.connect(**connection_args)
+
+        self.channel = self.ssh_client.invoke_shell()
+        self.channel.settimeout(2)
+
+        self.sftp_client = paramiko.SFTPClient.from_transport(self.ssh_client.get_transport())
 
     def run(self):
-        next_state = self.get_transition()
+        next_state = None
+        for state in self.states:
+            if state.state_type == 'enter':
+                next_state = state
+
         while next_state:
             self.current_state = next_state
 
             # do not run state if it is an exit state
+            print(self.current_state.state_type)
             if self.current_state.state_type == 'exit':
                 break
 
             self.current_state.run()
             next_state = self.get_transition()
+
+        return self.current_state
 
     def add_state(self, *args, **kwargs):
         _state = State(self, *args, **kwargs)
@@ -80,9 +106,15 @@ class Machine:
         _transition = Transition(self, *args, **kwargs)
         self.transitions.append(_transition)
 
+    def get_state(self, state_name):
+        for state in self.states:
+            if state.name == state_name:
+                return state
+        raise Exception("No state found")
+
     def get_transition(self):
         # filter so that only the states that derive from current state or none are left
-        _valid_transitions = list(filter(lambda x: x.source == self.current_state.name or x.source == None), self.transitions)
+        _valid_transitions = list(filter(lambda x: x.source == self.current_state.name or x.source == None, self.transitions))
 
         # sort by priority
         _valid_transitions = sorted(_valid_transitions, key=lambda x: x.priority, reverse=True)
@@ -90,13 +122,23 @@ class Machine:
         # loop through and return the first trigger
         for _transition in _valid_transitions:
             if _transition.is_triggered():
-                return _transition.get_destination()
+                return self.get_state(_transition.get_destination())
+
+        raise Exception("No transition found!")
 
     def listen(self):
-        pass
+        try:
+            while True:
+                current_buffer = self.channel.recv(self.buffer_len)
+                # if len of current buffer is 0 then channel has been closed
+                if len(current_buffer) == 0:
+                    break
+                self.buffer += current_buffer
+        except socket.timeout as e:
+            pass
 
 class State:
-    def __init__(self, machine, name, state_type, update_callback=None, action_callback=None):
+    def __init__(self, machine, name, state_type='inner', update_callback=None, action_callback=None):
         self.machine = machine
         self.name = name
         self.state_type = state_type
@@ -112,11 +154,11 @@ class State:
         if not _returning_from_interrupt:
             # step 1. Update
             if self.update_callback:
-                self.update_callback()
+                self.update_callback(self)
 
             # step 2. Actions
             if self.action_callback:
-                self.action_callback()
+                self.action_callback(self)
         else:
             self.machine.buffer = b''
             self.machine.interrupt = None
@@ -147,9 +189,18 @@ class Transition:
             return self.destination()
         return self.destination
 
-
 def default_setup():
-    machine = Machine()
+    connection_args = {
+        'username' : 'pi',
+        'password' : 'raspberry',
+        'hostname' : '70.79.136.37',
+        'port' : 4423
+    }
+
+    machine = Machine(connection_args)
+
+    # create entrance state
+    machine.add_state(name='enter', state_type='enter')
 
     # create exit states
     machine.add_state(name='success', state_type='exit')
@@ -158,9 +209,26 @@ def default_setup():
     # create retry state
     def increment_retries(state):
         state.machine.retries += 1
-    machine.add_state(name='retry', state_type='inner', update_callback=increment_retries)
+    machine.add_state(name='retry', update_callback=increment_retries)
 
-    #
+    # create sudo state
+    def enter_password(state):
+        state.machine.channel.send(connection_args['password'] + '\n')
+    machine.add_state(name="sudo_password_entry", action_callback=enter_password)
+
+    # create random state
+    def test_me(state):
+        state.machine.channel.send("ls -l /" + '\n')
+    machine.add_state(name="test me", action_callback=test_me)
+
+    # add transitions
+    machine.add_transition(destination='test me', source='enter')
+    machine.add_transition(destination='failure', priority=-1)
+
+    answer = machine.run()
+    print("exit state:", answer.name)
+    print(machine.buffer.decode('utf-8'))
+
 
 if __name__ == '__main__':
     default_setup()
