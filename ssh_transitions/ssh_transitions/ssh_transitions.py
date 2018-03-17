@@ -37,11 +37,36 @@ Two types of default actions
 - put
 '''
 
-
+import logging
 import paramiko
 import socket
 import re
 from functools import partial
+
+logger = logging.getLogger("ssh_transitions")
+logger.setLevel(logging.INFO)
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+
+
+def do_retry(trig):
+    print(trig.machine.retries, trig.machine.max_retries)
+    return trig.machine.retries <= trig.machine.max_retries
+
+def get_last_checkpoint(trig):
+    return trig.machine.checkpoint.name
+
+def standard_update(state):
+    # check that this state is a checkpoint and isn't retrying (or cycling)
+    if state.is_checkpoint and (not state.machine.checkpoint or state.machine.checkpoint.name != state.name):
+        state.machine.checkpoint = state
+        state.machine.retries = 0
+
+def get_sudo(trig):
+    return trig.machine.interrupt.name
 
 class Machine:
     def __init__(self, connection_args):
@@ -52,14 +77,15 @@ class Machine:
         self.transitions_count = 0
         self.transitions_max = 100
 
-        #
+        # initialize state related info
         self.current_state = None
+        self.previous_state = None
         self.history = []
 
         # retry related
         self.retries = 0
-        self.max_retires = 3
-        self.retry_checkpoint = None
+        self.max_retries = 1
+        self.checkpoint = None
 
         # interrupt related
         self.interrupt = None
@@ -75,25 +101,34 @@ class Machine:
         self.ssh_client.connect(**connection_args)
 
         self.channel = self.ssh_client.invoke_shell()
-        self.channel.settimeout(2)
+        self.channel.settimeout(60)
 
         self.sftp_client = paramiko.SFTPClient.from_transport(self.ssh_client.get_transport())
 
     def run(self):
+        # get the first state by searching for the enter state (there should only be 1 for predictable behaviour)
         next_state = None
         for state in self.states:
             if state.state_type == 'enter':
                 next_state = state
 
+        # main loop
         while next_state:
+            # set machine state info
+            self.previous_state = self.current_state
+            self.history.append(self.previous_state)
             self.current_state = next_state
 
+            logger.info('running state: "{name}"; type: {stype}'.format(name=self.current_state.name, stype=self.current_state.state_type))
+
             # do not run state if it is an exit state
-            print(self.current_state.state_type)
             if self.current_state.state_type == 'exit':
                 break
 
+            # run the state
             self.current_state.run()
+
+            # get the next state
             next_state = self.get_transition()
 
         return self.current_state
@@ -137,17 +172,24 @@ class Machine:
         except socket.timeout as e:
             pass
 
+    def send(self, msg):
+        self.channel.send(msg + '\n')
+
 class State:
-    def __init__(self, machine, name, state_type='inner', update_callback=None, action_callback=None):
+    def __init__(self, machine, name, is_checkpoint=True, state_type='inner', update_callback=standard_update, action=None):
         self.machine = machine
         self.name = name
         self.state_type = state_type
+        self.is_checkpoint = is_checkpoint
 
         # set callbacks
         self.update_callback = update_callback
-        self.action_callback = action_callback
+        self.action = action
 
     def run(self):
+        # reset the buffer
+        self.machine.buffer = b''
+
         # are we returning from an interrupt
         _returning_from_interrupt = self.machine.interrupt and self.machine.interrupt == self.name
 
@@ -157,15 +199,17 @@ class State:
                 self.update_callback(self)
 
             # step 2. Actions
-            if self.action_callback:
-                self.action_callback(self)
+            if self.action:
+                if isinstance(self.action, str):
+                    self.machine.send(self.action)
+                elif callable(self.action):
+                    self.action(self)
         else:
-            self.machine.buffer = b''
             self.machine.interrupt = None
 
         # step 3. Read
         self.machine.listen()
-
+        print(self.machine.buffer.decode('utf-8'))
 
 class Transition:
     def __init__(self, machine, destination, trigger=None, source=None, priority=0):
@@ -179,14 +223,14 @@ class Transition:
         if self.trigger is None:
             return True
         elif isinstance(self.trigger, str):
-            return bool(re.search(self.trigger, self.machine.buffer.decode('utf-8'), re.DOTALL))
+            return bool(re.search(self.trigger, self.machine.buffer.decode('utf-8')))
         elif callable(self.trigger):
-            return bool(self.trigger)
+            return bool(self.trigger(self))
         return False
 
     def get_destination(self):
         if callable(self.destination):
-            return self.destination()
+            return self.destination(self)
         return self.destination
 
 def default_setup():
@@ -200,8 +244,7 @@ def default_setup():
     machine = Machine(connection_args)
 
     # create entrance state
-    machine.add_state(name='enter', state_type='enter')
-
+    machine.add_state(name="entry", state_type='enter')
     # create exit states
     machine.add_state(name='success', state_type='exit')
     machine.add_state(name='failure', state_type='exit')
@@ -209,26 +252,45 @@ def default_setup():
     # create retry state
     def increment_retries(state):
         state.machine.retries += 1
-    machine.add_state(name='retry', update_callback=increment_retries)
+    machine.add_state(name='retry', is_checkpoint=False, update_callback=increment_retries)
 
     # create sudo state
-    def enter_password(state):
-        state.machine.channel.send(connection_args['password'] + '\n')
-    machine.add_state(name="sudo_password_entry", action_callback=enter_password)
+    machine.add_state(name="sudo", action=connection_args['password'])
 
-    # create random state
-    def test_me(state):
-        state.machine.channel.send("ls -l /" + '\n')
-    machine.add_state(name="test me", action_callback=test_me)
+    # BUILTIN TRANSITIONS
+    # retry/failure
+    machine.add_transition(destination='retry', priority=-100)
+    machine.add_transition(source='retry', destination='failure', priority=-1)
+    machine.add_transition(source='retry', destination=get_last_checkpoint, trigger=do_retry, priority=0)
 
-    # add transitions
-    machine.add_transition(destination='test me', source='enter')
-    machine.add_transition(destination='failure', priority=-1)
+    # sudo
+    machine.add_transition(destination='sudo', trigger="\[sudo\] password for")
+    machine.add_transition(source='sudo', destination='failure', trigger="incorrect password attempts", priority=1)
+    machine.add_transition(source='sudo', destination=get_sudo, priority=-200)
 
-    answer = machine.run()
-    print("exit state:", answer.name)
-    print(machine.buffer.decode('utf-8'))
-
+    return machine
 
 if __name__ == '__main__':
-    default_setup()
+    machine = default_setup()
+
+    # USER DEFINED AREA
+    # State 1: Get updates
+    machine.add_transition(destination='update', source='entry')
+    machine.add_state(name="update", action="sudo apt-get update -y")
+
+    # State 2
+    machine.add_transition(destination='upgrade', source='update', trigger="stretch InRelease")
+    machine.add_transition(destination='upgrade', source='update', trigger="successfully updated")
+    machine.add_state(name="upgrade", action="sudo apt-get upgrade -y")
+
+    # State 2: Install tmux
+    machine.add_transition(destination='install tmux', source="upgrade", trigger="successfully upgraded")
+    machine.add_state(name="install tmux", action="sudo apt-get install -y tmux")
+
+    # Success case
+    machine.add_transition(source="install tmux", destination='success', trigger="tmux is already the newest version", priority=1)
+    machine.add_transition(source="install tmux", destination='success', trigger="successfully installed tmux", priority=1)
+
+
+    answer = machine.run()
+    print("result", answer.name)
