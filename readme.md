@@ -1,3 +1,3 @@
-# Projects
+Old, mostly undocumented projects
 
-Documentation Structure
+Some projects are complete, most are incomplete. Kept for code references and ideas
